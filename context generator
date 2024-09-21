@@ -1,0 +1,102 @@
+import torch
+from transformers import VisionEncoderDecoderModel, ViTFeatureExtractor, AutoTokenizer
+from PIL import Image
+from googletrans import Translator
+from gtts import gTTS
+from IPython.display import Audio, display
+import zipfile
+import os
+
+# Load pre-trained ViT for feature extraction and Transformer model for captioning
+def load_models():
+    model = VisionEncoderDecoderModel.from_pretrained("nlpconnect/vit-gpt2-image-captioning")
+    feature_extractor = ViTFeatureExtractor.from_pretrained("nlpconnect/vit-gpt2-image-captioning")
+    tokenizer = AutoTokenizer.from_pretrained("nlpconnect/vit-gpt2-image-captioning")
+    return model, feature_extractor, tokenizer
+
+# Preprocess the image to be compatible with ViT
+def preprocess_image(image_path, feature_extractor):
+    image = Image.open(image_path)
+    pixel_values = feature_extractor(images=image, return_tensors="pt").pixel_values
+    return pixel_values
+
+# Generate the caption for the image
+def generate_caption(model, feature_extractor, tokenizer, image_path):
+    pixel_values = preprocess_image(image_path, feature_extractor)
+    output_ids = model.generate(pixel_values, max_length=16, num_beams=4, repetition_penalty=2.0)
+    caption = tokenizer.decode(output_ids[0], skip_special_tokens=True)
+    return caption
+
+# Function to translate text from English to another language
+def translate_text(text, dest_lang):
+    translator = Translator()
+    translation = translator.translate(text, src='en', dest=dest_lang)
+    return translation.text
+
+# Function to convert translated text to audio and play it in Colab
+def text_to_audio(text, lang_code):
+    tts = gTTS(text=text, lang=lang_code, slow=False)
+    tts.save('translated_audio.mp3')
+    print(f"Playing the audio file for the translated text...")
+    display(Audio('translated_audio.mp3', autoplay=True))  # Play the audio directly in Colab
+
+# Language selection dictionary
+languages = {
+    '1': ('te', 'Telugu'),
+    '2': ('ta', 'Tamil'),
+    '3': ('hi', 'Hindi'),
+    '4': ('fr', 'French'),
+    '5': ('es', 'Spanish')
+}
+
+# Function to extract images from ZIP file
+def extract_zip(zip_path, extract_to='/content/extracted_images'):
+    with zipfile.ZipFile(zip_path, 'r') as zip_ref:
+        zip_ref.extractall(extract_to)
+    return extract_to
+
+# Main function to run the pipeline for each image in the zip file
+def image_to_caption_and_translate(zip_path):
+    model, feature_extractor, tokenizer = load_models()
+
+    # Extract images from the zip file
+    extract_dir = extract_zip(zip_path)
+
+    # Get list of image files
+    image_files = [f for f in os.listdir(extract_dir) if f.endswith(('jpg', 'jpeg', 'png'))]
+
+    # Display language options
+    print("\nSelect the destination language for translation:")
+    for key, value in languages.items():
+        print(f"{key}. {value[1]}")
+
+    # Take input for destination language selection
+    dest_choice = input("\nEnter the number corresponding to the destination language: ")
+
+    # Check if the selected choice is valid
+    if dest_choice in languages:
+        dest_lang_code, dest_lang_name = languages[dest_choice]
+        print(f"\nYou selected: {dest_lang_name}")
+
+        # Process each image in the extracted folder
+        for img_file in image_files:
+            img_path = os.path.join(extract_dir, img_file)
+            print(f"\nProcessing image: {img_file}")
+
+            # Generate caption
+            caption = generate_caption(model, feature_extractor, tokenizer, img_path)
+            print(f"Generated Caption: {caption}")
+
+            # Translate the caption
+            translated_caption = translate_text(caption, dest_lang_code)
+            print(f"Translated Caption: {translated_caption}")
+
+            # Convert the translated caption to audio and play it
+            text_to_audio(translated_caption, dest_lang_code)
+    else:
+        print("Invalid selection. Please choose a valid option.")
+
+# Example usage
+if __name__ == "__main__":
+    zip_path = '/content/img.zip'  # Path to your ZIP file containing images
+    image_to_caption_and_translate(zip_path)
